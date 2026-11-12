@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.util.Log;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
@@ -19,6 +20,7 @@ import java.net.Socket;
 import java.util.UUID;
 
 public class BridgeService extends Service {
+    private static final String TAG = "BtBridge";
     private static final UUID BRIDGE_UUID =
             UUID.fromString("8ce255c0-200a-11e0-ac64-0800200c9a66");
     private static final int PORT = 31416;
@@ -69,7 +71,8 @@ public class BridgeService extends Service {
             new Thread(() -> {
                 try {
                     com.genymobile.gnirehtet.Main.main(new String[]{"relay"});
-                } catch (Throwable ignored) {
+                } catch (Throwable t) {
+                    Log.e(TAG, "Errore relay gnirehtet", t);
                     relayRunning = false;
                 }
             }).start();
@@ -79,7 +82,7 @@ public class BridgeService extends Service {
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         while (running) {
             try {
-                activeBtServer = adapter.listenUsingRfcommWithServiceRecord("BtBridge", BRIDGE_UUID);
+                activeBtServer = adapter.listenUsingInsecureRfcommWithServiceRecord("BtBridge", BRIDGE_UUID);
                 while (running) {
                     final BluetoothSocket bt = activeBtServer.accept();
                     new Thread(() -> {
@@ -88,11 +91,13 @@ public class BridgeService extends Service {
                             tcp.setTcpNoDelay(true);
                             pipeBidirectional(bt, tcp);
                         } catch (Exception e) {
+                            Log.e(TAG, "Server TCP connect fallito", e);
                             try { bt.close(); } catch (Exception ignored) {}
                         }
                     }).start();
                 }
             } catch (Exception e) {
+                Log.e(TAG, "Server BT listen fallito", e);
                 sleepQuiet(1500);
             }
         }
@@ -109,15 +114,17 @@ public class BridgeService extends Service {
                     new Thread(() -> {
                         try {
                             BluetoothDevice dev = adapter.getRemoteDevice(mac);
-                            BluetoothSocket bt = dev.createRfcommSocketToServiceRecord(BRIDGE_UUID);
+                            BluetoothSocket bt = dev.createInsecureRfcommSocketToServiceRecord(BRIDGE_UUID);
                             bt.connect();
                             pipeBidirectional(bt, tcp);
                         } catch (Exception e) {
+                            Log.e(TAG, "Client BT connect fallito verso " + mac, e);
                             try { tcp.close(); } catch (Exception ignored) {}
                         }
                     }).start();
                 }
             } catch (Exception e) {
+                Log.e(TAG, "Client TCP listen fallito", e);
                 sleepQuiet(1500);
             }
         }
