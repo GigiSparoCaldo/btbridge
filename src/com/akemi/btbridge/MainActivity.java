@@ -3,7 +3,6 @@ package com.akemi.btbridge;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -75,8 +74,8 @@ public class MainActivity extends Activity {
         root.addView(testBtn);
 
         Button stopBtn = new Button(this);
-        stopBtn.setText("Stop Bridge");
-        stopBtn.setOnClickListener(v -> stopBridge());
+        stopBtn.setText("Stop Tutto");
+        stopBtn.setOnClickListener(v -> stopAll());
         root.addView(stopBtn);
 
         TextView clientLabel = new TextView(this);
@@ -172,8 +171,13 @@ public class MainActivity extends Activity {
         updateStatusView();
     }
 
-    private void stopBridge() {
+    private void stopAll() {
         netStatus = "";
+        try {
+            Intent stopVpn = new Intent(this, com.genymobile.gnirehtet.GnirehtetActivity.class);
+            stopVpn.setAction("com.genymobile.gnirehtet.STOP");
+            startActivity(stopVpn);
+        } catch (Exception ignored) {}
         Intent svc = new Intent(this, BridgeService.class);
         svc.setAction("STOP");
         startService(svc);
@@ -182,12 +186,12 @@ public class MainActivity extends Activity {
 
     private void startGnirehtet() {
         try {
-            Intent i = new Intent("com.genymobile.gnirehtet.START");
-            i.setComponent(new ComponentName("com.genymobile.gnirehtet", "com.genymobile.gnirehtet.GnirehtetActivity"));
+            Intent i = new Intent(this, com.genymobile.gnirehtet.GnirehtetActivity.class);
+            i.setAction("com.genymobile.gnirehtet.START");
             startActivity(i);
-            netStatus = "Avvio VPN inviato";
+            netStatus = "VPN interna avviata";
         } catch (Exception e) {
-            netStatus = "Err VPN: " + e.getClass().getSimpleName();
+            netStatus = "Err VPN: " + e.getMessage();
         }
         updateStatusView();
     }

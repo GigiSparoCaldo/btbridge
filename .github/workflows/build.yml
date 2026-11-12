@@ -11,20 +11,23 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Download gnirehtet and Compile APK
+      - name: Download gnirehtet client+relay and Compile single APK
         run: |
-          curl -L -o gnirehtet.zip https://github.com/Genymobile/gnirehtet/releases/download/v2.5.1/gnirehtet-java-v2.5.1.zip
-          unzip -j gnirehtet.zip "*/gnirehtet.jar" "*/gnirehtet.apk" -d .
+          curl -L -o gnirehtet-bin.zip https://github.com/Genymobile/gnirehtet/releases/download/v2.5.1/gnirehtet-java-v2.5.1.zip
+          unzip -j gnirehtet-bin.zip "*/gnirehtet.jar" -d .
+          curl -L -o gnirehtet-src.zip https://github.com/Genymobile/gnirehtet/archive/refs/tags/v2.5.1.zip
+          unzip -q gnirehtet-src.zip
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 | sort -V | tail -n 1)
           AJAR=$(find "$ANDROID_HOME/platforms" -name "android.jar" | sort -V | tail -n 1)
-          mkdir -p build/classes build/dex
-          javac --release 11 -cp "$AJAR:gnirehtet.jar" -d build/classes src/com/akemi/btbridge/*.java
-          "$BT/d8" --min-api 26 --output build/dex build/classes/com/akemi/btbridge/*.class gnirehtet.jar
-          if [ -x "$BT/aapt2" ]; then
-            "$BT/aapt2" link -o build/unsigned.apk --manifest AndroidManifest.xml -I "$AJAR"
-          else
-            "$BT/aapt" package -f -M AndroidManifest.xml -I "$AJAR" -F build/unsigned.apk
-          fi
+          mkdir -p build/classes build/dex build/gen
+          "$BT/aapt2" compile --dir gnirehtet-2.5.1/app/src/main/res -o build/gnirehtet_res.zip
+          "$BT/aapt2" link -o build/unsigned.apk --manifest AndroidManifest.xml -I "$AJAR" \
+            --custom-package com.genymobile.gnirehtet --java build/gen build/gnirehtet_res.zip
+          javac --release 11 -cp "$AJAR:gnirehtet.jar" -d build/classes \
+            build/gen/com/genymobile/gnirehtet/R.java \
+            gnirehtet-2.5.1/app/src/main/java/com/genymobile/gnirehtet/*.java \
+            src/com/akemi/btbridge/*.java
+          "$BT/d8" --min-api 26 --output build/dex $(find build/classes -name "*.class") gnirehtet.jar
           (cd build/dex && zip -q -u ../unsigned.apk classes*.dex)
           "$BT/zipalign" -f 4 build/unsigned.apk build/aligned.apk
           keytool -genkeypair -v -keystore debug.keystore -storepass android \
@@ -35,6 +38,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: BtBridge-Files
-          path: |
-            BtBridge.apk
-            gnirehtet.apk
+          path: BtBridge.apk
