@@ -4,6 +4,10 @@
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
 
+    <queries>
+        <package android:name="com.genymobile.gnirehtet" />
+    </queries>
+
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

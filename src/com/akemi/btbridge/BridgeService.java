@@ -15,6 +15,7 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.Socket;
 import java.util.UUID;
 
@@ -122,14 +123,7 @@ public class BridgeService extends Service {
                         BluetoothSocket bt = null;
                         try {
                             BluetoothDevice dev = adapter.getRemoteDevice(mac);
-                            try {
-                                bt = dev.createInsecureRfcommSocketToServiceRecord(BRIDGE_UUID);
-                                bt.connect();
-                            } catch (Exception firstErr) {
-                                try { if (bt != null) bt.close(); } catch (Exception ignored) {}
-                                bt = dev.createRfcommSocketToServiceRecord(BRIDGE_UUID);
-                                bt.connect();
-                            }
+                            bt = connectBt(dev);
                             lastInfo = "BT connesso a Z Flip!";
                             final BluetoothSocket finalBt = bt;
                             Runnable closeAll = () -> {
@@ -150,6 +144,23 @@ public class BridgeService extends Service {
                 sleepQuiet(1500);
             }
         }
+    }
+
+    private BluetoothSocket connectBt(BluetoothDevice dev) throws Exception {
+        try {
+            BluetoothSocket s = dev.createInsecureRfcommSocketToServiceRecord(BRIDGE_UUID);
+            s.connect();
+            return s;
+        } catch (Exception ignored) {}
+        try {
+            BluetoothSocket s = dev.createRfcommSocketToServiceRecord(BRIDGE_UUID);
+            s.connect();
+            return s;
+        } catch (Exception ignored) {}
+        Method m = dev.getClass().getMethod("createInsecureRfcommSocket", int.class);
+        BluetoothSocket s = (BluetoothSocket) m.invoke(dev, 1);
+        s.connect();
+        return s;
     }
 
     private void pipeStreams(InputStream in1, OutputStream out1,

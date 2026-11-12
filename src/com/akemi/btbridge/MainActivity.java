@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -23,6 +25,15 @@ import java.util.Set;
 public class MainActivity extends Activity {
     private TextView statusText;
     private LinearLayout devicesBox;
+    private String netStatus = "";
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable statusUpdater = new Runnable() {
+        @Override
+        public void run() {
+            updateStatusView();
+            handler.postDelayed(this, 1500);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,9 +47,9 @@ public class MainActivity extends Activity {
 
         statusText = new TextView(this);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setText("BtBridge Pronto");
         statusText.setPadding(0, 0, 0, 16);
         root.addView(statusText);
+        updateStatusView();
 
         String savedMac = loadMac();
         if (!savedMac.isEmpty()) {
@@ -84,6 +95,27 @@ public class MainActivity extends Activity {
         requestBtPermissionAndLoad();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        handler.post(statusUpdater);
+    }
+
+    @Override
+    protected void onPause() {
+        handler.removeCallbacks(statusUpdater);
+        super.onPause();
+    }
+
+    private void updateStatusView() {
+        if (statusText == null) return;
+        String text = "Bridge: " + BridgeService.lastInfo;
+        if (!netStatus.isEmpty()) {
+            text += "\nRete: " + netStatus;
+        }
+        statusText.setText(text);
+    }
+
     private void requestBtPermissionAndLoad() {
         if (Build.VERSION.SDK_INT >= 31 &&
                 checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != PackageManager.PERMISSION_GRANTED) {
@@ -126,23 +158,26 @@ public class MainActivity extends Activity {
                 devicesBox.addView(b);
             }
         } catch (SecurityException e) {
-            statusText.setText("Permesso BT mancante");
+            netStatus = "Permesso BT mancante";
+            updateStatusView();
         }
     }
 
     private void startBridge(String mode, String mac) {
+        netStatus = "";
         Intent svc = new Intent(this, BridgeService.class);
         svc.putExtra("mode", mode);
         svc.putExtra("mac", mac);
         startForegroundService(svc);
-        statusText.setText("ATTIVO: " + mode.toUpperCase() + (mac.isEmpty() ? "" : "\n" + mac));
+        updateStatusView();
     }
 
     private void stopBridge() {
+        netStatus = "";
         Intent svc = new Intent(this, BridgeService.class);
         svc.setAction("STOP");
         startService(svc);
-        statusText.setText("FERMO");
+        updateStatusView();
     }
 
     private void startGnirehtet() {
@@ -150,13 +185,16 @@ public class MainActivity extends Activity {
             Intent i = new Intent("com.genymobile.gnirehtet.START");
             i.setComponent(new ComponentName("com.genymobile.gnirehtet", "com.genymobile.gnirehtet.GnirehtetActivity"));
             startActivity(i);
+            netStatus = "Avvio VPN inviato";
         } catch (Exception e) {
-            statusText.setText("Installa prima gnirehtet.apk");
+            netStatus = "Err VPN: " + e.getClass().getSimpleName();
         }
+        updateStatusView();
     }
 
     private void runNetTest() {
-        statusText.setText("Verifica rete in corso...");
+        netStatus = "Verifica rete...";
+        updateStatusView();
         new Thread(() -> {
             try {
                 HttpURLConnection c = (HttpURLConnection) new URL("https://clients3.google.com/generate_204").openConnection();
@@ -164,10 +202,11 @@ public class MainActivity extends Activity {
                 c.setReadTimeout(5000);
                 int code = c.getResponseCode();
                 c.disconnect();
-                runOnUiThread(() -> statusText.setText("ONLINE OK (HTTP " + code + ")"));
+                netStatus = "ONLINE OK (HTTP " + code + ")";
             } catch (Exception e) {
-                runOnUiThread(() -> statusText.setText("OFFLINE: " + e.getClass().getSimpleName()));
+                netStatus = "OFFLINE: " + e.getClass().getSimpleName();
             }
+            runOnUiThread(this::updateStatusView);
         }).start();
     }
 
