@@ -27,7 +27,7 @@
 
         <activity
             android:name="com.genymobile.gnirehtet.GnirehtetActivity"
-            android:theme="@android:style/Theme.NoDisplay"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.genymobile.gnirehtet.START" />

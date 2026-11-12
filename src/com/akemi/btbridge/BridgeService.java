@@ -27,6 +27,7 @@ public class BridgeService extends Service {
     public static volatile String lastInfo = "Pronto";
     private static volatile boolean relayRunning = false;
     private volatile boolean running = false;
+    private volatile int sessionId = 0;
     private BluetoothServerSocket activeBtServer;
     private LocalServerSocket activeLocalServer;
     private PowerManager.WakeLock wakeLock;
@@ -34,6 +35,7 @@ public class BridgeService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && "STOP".equals(intent.getAction())) {
+            sessionId++;
             cleanup();
             lastInfo = "Fermo";
             stopForeground(STOP_FOREGROUND_REMOVE);
@@ -51,6 +53,7 @@ public class BridgeService extends Service {
                 .build();
         startForeground(1, notif);
 
+        final int mySession = ++sessionId;
         cleanup();
         acquireWakeLock();
         running = true;
@@ -59,21 +62,21 @@ public class BridgeService extends Service {
         final String mac = intent != null ? intent.getStringExtra("mac") : "";
 
         new Thread(() -> {
-            if ("client".equals(mode)) runClient(mac);
-            else runServer();
+            if ("client".equals(mode)) runClient(mac, mySession);
+            else runServer(mySession);
         }).start();
 
         return START_STICKY;
     }
 
-    private void runServer() {
+    private void runServer(int mySession) {
         if (!relayRunning) {
             relayRunning = true;
             new Thread(() -> {
                 try {
                     com.genymobile.gnirehtet.Main.main(new String[]{"relay"});
                 } catch (Throwable t) {
-                    lastInfo = "Err relay: " + t.getMessage();
+                    if (sessionId == mySession) lastInfo = "Err relay: " + t.getMessage();
                     relayRunning = false;
                 }
             }).start();
@@ -81,17 +84,17 @@ public class BridgeService extends Service {
         }
 
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        while (running) {
+        while (running && sessionId == mySession) {
             try {
                 activeBtServer = adapter.listenUsingInsecureRfcommWithServiceRecord("BtBridge", BRIDGE_UUID);
-                lastInfo = "Server BT in ascolto";
-                while (running) {
+                if (sessionId == mySession) lastInfo = "Server BT in ascolto";
+                while (running && sessionId == mySession) {
                     final BluetoothSocket bt = activeBtServer.accept();
                     new Thread(() -> {
                         try {
                             Socket tcp = new Socket("127.0.0.1", PORT);
                             tcp.setTcpNoDelay(true);
-                            lastInfo = "Tunnel attivo con Watch!";
+                            if (sessionId == mySession) lastInfo = "Tunnel attivo con Watch!";
                             Runnable closeAll = () -> {
                                 try { bt.close(); } catch (Exception ignored) {}
                                 try { tcp.close(); } catch (Exception ignored) {}
@@ -99,32 +102,34 @@ public class BridgeService extends Service {
                             pipeStreams(bt.getInputStream(), tcp.getOutputStream(),
                                     tcp.getInputStream(), bt.getOutputStream(), closeAll);
                         } catch (Exception e) {
-                            lastInfo = "Err TCP ZFlip: " + e.getMessage();
+                            if (sessionId == mySession) lastInfo = "Err TCP ZFlip: " + e.getMessage();
                             try { bt.close(); } catch (Exception ignored) {}
                         }
                     }).start();
                 }
             } catch (Exception e) {
-                lastInfo = "Err BT Server: " + e.getMessage();
-                sleepQuiet(1500);
+                if (sessionId == mySession) {
+                    lastInfo = "Err BT Server: " + e.getMessage();
+                    sleepQuiet(1500);
+                }
             }
         }
     }
 
-    private void runClient(String mac) {
+    private void runClient(String mac, int mySession) {
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        while (running) {
+        while (running && sessionId == mySession) {
             try {
                 activeLocalServer = new LocalServerSocket("gnirehtet");
-                lastInfo = "Client pronto (" + mac + ")";
-                while (running) {
+                if (sessionId == mySession) lastInfo = "Client pronto (" + mac + ")";
+                while (running && sessionId == mySession) {
                     final LocalSocket local = activeLocalServer.accept();
                     new Thread(() -> {
                         BluetoothSocket bt = null;
                         try {
                             BluetoothDevice dev = adapter.getRemoteDevice(mac);
                             bt = connectBt(dev);
-                            lastInfo = "BT connesso a Z Flip!";
+                            if (sessionId == mySession) lastInfo = "BT connesso a Z Flip!";
                             final BluetoothSocket finalBt = bt;
                             Runnable closeAll = () -> {
                                 try { finalBt.close(); } catch (Exception ignored) {}
@@ -133,15 +138,17 @@ public class BridgeService extends Service {
                             pipeStreams(finalBt.getInputStream(), local.getOutputStream(),
                                     local.getInputStream(), finalBt.getOutputStream(), closeAll);
                         } catch (Exception e) {
-                            lastInfo = "Err BT: " + e.getMessage();
+                            if (sessionId == mySession) lastInfo = "Err BT: " + e.getMessage();
                             try { if (bt != null) bt.close(); } catch (Exception ignored) {}
                             try { local.close(); } catch (Exception ignored) {}
                         }
                     }).start();
                 }
             } catch (Exception e) {
-                lastInfo = "Err LocalSocket: " + e.getMessage();
-                sleepQuiet(1500);
+                if (sessionId == mySession) {
+                    lastInfo = "Err LocalSocket: " + e.getMessage();
+                    sleepQuiet(1500);
+                }
             }
         }
     }
@@ -207,6 +214,7 @@ public class BridgeService extends Service {
 
     @Override
     public void onDestroy() {
+        sessionId++;
         cleanup();
         super.onDestroy();
     }
