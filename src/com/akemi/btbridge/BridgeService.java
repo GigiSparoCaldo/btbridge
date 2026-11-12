@@ -9,32 +9,32 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
+import android.net.LocalServerSocket;
+import android.net.LocalSocket;
 import android.os.IBinder;
 import android.os.PowerManager;
-import android.util.Log;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.UUID;
 
 public class BridgeService extends Service {
-    private static final String TAG = "BtBridge";
     private static final UUID BRIDGE_UUID =
             UUID.fromString("8ce255c0-200a-11e0-ac64-0800200c9a66");
     private static final int PORT = 31416;
 
+    public static volatile String lastInfo = "Pronto";
     private static volatile boolean relayRunning = false;
     private volatile boolean running = false;
     private BluetoothServerSocket activeBtServer;
-    private ServerSocket activeTcpServer;
+    private LocalServerSocket activeLocalServer;
     private PowerManager.WakeLock wakeLock;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && "STOP".equals(intent.getAction())) {
             cleanup();
+            lastInfo = "Fermo";
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
             System.exit(0);
@@ -72,32 +72,39 @@ public class BridgeService extends Service {
                 try {
                     com.genymobile.gnirehtet.Main.main(new String[]{"relay"});
                 } catch (Throwable t) {
-                    Log.e(TAG, "Errore relay gnirehtet", t);
+                    lastInfo = "Err relay: " + t.getMessage();
                     relayRunning = false;
                 }
             }).start();
-            sleepQuiet(500);
+            sleepQuiet(600);
         }
 
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         while (running) {
             try {
                 activeBtServer = adapter.listenUsingInsecureRfcommWithServiceRecord("BtBridge", BRIDGE_UUID);
+                lastInfo = "Server BT in ascolto";
                 while (running) {
                     final BluetoothSocket bt = activeBtServer.accept();
                     new Thread(() -> {
                         try {
                             Socket tcp = new Socket("127.0.0.1", PORT);
                             tcp.setTcpNoDelay(true);
-                            pipeBidirectional(bt, tcp);
+                            lastInfo = "Tunnel attivo con Watch!";
+                            Runnable closeAll = () -> {
+                                try { bt.close(); } catch (Exception ignored) {}
+                                try { tcp.close(); } catch (Exception ignored) {}
+                            };
+                            pipeStreams(bt.getInputStream(), tcp.getOutputStream(),
+                                    tcp.getInputStream(), bt.getOutputStream(), closeAll);
                         } catch (Exception e) {
-                            Log.e(TAG, "Server TCP connect fallito", e);
+                            lastInfo = "Err TCP ZFlip: " + e.getMessage();
                             try { bt.close(); } catch (Exception ignored) {}
                         }
                     }).start();
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Server BT listen fallito", e);
+                lastInfo = "Err BT Server: " + e.getMessage();
                 sleepQuiet(1500);
             }
         }
@@ -107,42 +114,56 @@ public class BridgeService extends Service {
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         while (running) {
             try {
-                activeTcpServer = new ServerSocket(PORT, 8, InetAddress.getByName("127.0.0.1"));
+                activeLocalServer = new LocalServerSocket("gnirehtet");
+                lastInfo = "Client pronto (" + mac + ")";
                 while (running) {
-                    final Socket tcp = activeTcpServer.accept();
-                    tcp.setTcpNoDelay(true);
+                    final LocalSocket local = activeLocalServer.accept();
                     new Thread(() -> {
+                        BluetoothSocket bt = null;
                         try {
                             BluetoothDevice dev = adapter.getRemoteDevice(mac);
-                            BluetoothSocket bt = dev.createInsecureRfcommSocketToServiceRecord(BRIDGE_UUID);
-                            bt.connect();
-                            pipeBidirectional(bt, tcp);
+                            try {
+                                bt = dev.createInsecureRfcommSocketToServiceRecord(BRIDGE_UUID);
+                                bt.connect();
+                            } catch (Exception firstErr) {
+                                try { if (bt != null) bt.close(); } catch (Exception ignored) {}
+                                bt = dev.createRfcommSocketToServiceRecord(BRIDGE_UUID);
+                                bt.connect();
+                            }
+                            lastInfo = "BT connesso a Z Flip!";
+                            final BluetoothSocket finalBt = bt;
+                            Runnable closeAll = () -> {
+                                try { finalBt.close(); } catch (Exception ignored) {}
+                                try { local.close(); } catch (Exception ignored) {}
+                            };
+                            pipeStreams(finalBt.getInputStream(), local.getOutputStream(),
+                                    local.getInputStream(), finalBt.getOutputStream(), closeAll);
                         } catch (Exception e) {
-                            Log.e(TAG, "Client BT connect fallito verso " + mac, e);
-                            try { tcp.close(); } catch (Exception ignored) {}
+                            lastInfo = "Err BT: " + e.getMessage();
+                            try { if (bt != null) bt.close(); } catch (Exception ignored) {}
+                            try { local.close(); } catch (Exception ignored) {}
                         }
                     }).start();
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Client TCP listen fallito", e);
+                lastInfo = "Err LocalSocket: " + e.getMessage();
                 sleepQuiet(1500);
             }
         }
     }
 
-    private void pipeBidirectional(BluetoothSocket bt, Socket tcp) {
-        Thread t1 = new Thread(() -> copyStream(bt, tcp, true));
-        Thread t2 = new Thread(() -> copyStream(bt, tcp, false));
+    private void pipeStreams(InputStream in1, OutputStream out1,
+                             InputStream in2, OutputStream out2, Runnable closeAll) {
+        Thread t1 = new Thread(() -> copyLoop(in1, out1, closeAll));
+        Thread t2 = new Thread(() -> copyLoop(in2, out2, closeAll));
         t1.start();
         t2.start();
         try { t1.join(); t2.join(); } catch (InterruptedException ignored) {}
     }
 
-    private void copyStream(BluetoothSocket bt, Socket tcp, boolean btToTcp) {
+    private void copyLoop(InputStream in, OutputStream out, Runnable closeAll) {
         byte[] buf = new byte[8192];
         try {
-            InputStream in = btToTcp ? bt.getInputStream() : tcp.getInputStream();
-            OutputStream out = btToTcp ? tcp.getOutputStream() : bt.getOutputStream();
             int n;
             while ((n = in.read(buf)) != -1) {
                 out.write(buf, 0, n);
@@ -150,8 +171,7 @@ public class BridgeService extends Service {
             }
         } catch (Exception ignored) {
         } finally {
-            try { bt.close(); } catch (Exception ignored) {}
-            try { tcp.close(); } catch (Exception ignored) {}
+            closeAll.run();
         }
     }
 
@@ -166,7 +186,7 @@ public class BridgeService extends Service {
     private void cleanup() {
         running = false;
         try { if (activeBtServer != null) activeBtServer.close(); } catch (Exception ignored) {}
-        try { if (activeTcpServer != null) activeTcpServer.close(); } catch (Exception ignored) {}
+        try { if (activeLocalServer != null) activeLocalServer.close(); } catch (Exception ignored) {}
         try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) {}
     }
 
