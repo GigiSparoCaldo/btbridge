@@ -16,6 +16,7 @@ import android.os.PowerManager;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.util.UUID;
 
@@ -26,6 +27,7 @@ public class BridgeService extends Service {
 
     public static volatile String lastInfo = "Pronto";
     private static volatile boolean relayRunning = false;
+    private static volatile String relayError = null;
     private volatile boolean running = false;
     private volatile int sessionId = 0;
     private BluetoothServerSocket activeBtServer;
@@ -72,28 +74,31 @@ public class BridgeService extends Service {
     private void runServer(int mySession) {
         if (!relayRunning) {
             relayRunning = true;
+            relayError = null;
             new Thread(() -> {
                 try {
                     com.genymobile.gnirehtet.Main.main(new String[]{"relay"});
+                    relayError = "Relay terminato";
                 } catch (Throwable t) {
-                    if (sessionId == mySession) lastInfo = "Err relay: " + t.getMessage();
+                    relayError = t.getClass().getSimpleName() + ": " + t.getMessage();
                     relayRunning = false;
                 }
             }).start();
-            sleepQuiet(600);
+            sleepQuiet(700);
         }
 
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         while (running && sessionId == mySession) {
             try {
                 activeBtServer = adapter.listenUsingInsecureRfcommWithServiceRecord("BtBridge", BRIDGE_UUID);
-                if (sessionId == mySession) lastInfo = "Server BT in ascolto";
+                if (sessionId == mySession) {
+                    lastInfo = (relayError != null) ? ("Err relay: " + relayError) : "Server BT in ascolto";
+                }
                 while (running && sessionId == mySession) {
                     final BluetoothSocket bt = activeBtServer.accept();
                     new Thread(() -> {
                         try {
-                            Socket tcp = new Socket("127.0.0.1", PORT);
-                            tcp.setTcpNoDelay(true);
+                            Socket tcp = connectLocalRelay();
                             if (sessionId == mySession) lastInfo = "Tunnel attivo con Watch!";
                             Runnable closeAll = () -> {
                                 try { bt.close(); } catch (Exception ignored) {}
@@ -102,7 +107,11 @@ public class BridgeService extends Service {
                             pipeStreams(bt.getInputStream(), tcp.getOutputStream(),
                                     tcp.getInputStream(), bt.getOutputStream(), closeAll);
                         } catch (Exception e) {
-                            if (sessionId == mySession) lastInfo = "Err TCP ZFlip: " + e.getMessage();
+                            if (sessionId == mySession) {
+                                lastInfo = (relayError != null)
+                                        ? ("Err relay: " + relayError)
+                                        : ("Err TCP ZFlip: " + e.getMessage());
+                            }
                             try { bt.close(); } catch (Exception ignored) {}
                         }
                     }).start();
@@ -114,6 +123,22 @@ public class BridgeService extends Service {
                 }
             }
         }
+    }
+
+    private Socket connectLocalRelay() throws Exception {
+        try {
+            Socket s = new Socket(InetAddress.getLoopbackAddress(), PORT);
+            s.setTcpNoDelay(true);
+            return s;
+        } catch (Exception ignored) {}
+        try {
+            Socket s = new Socket("::1", PORT);
+            s.setTcpNoDelay(true);
+            return s;
+        } catch (Exception ignored) {}
+        Socket s = new Socket("127.0.0.1", PORT);
+        s.setTcpNoDelay(true);
+        return s;
     }
 
     private void runClient(String mac, int mySession) {
