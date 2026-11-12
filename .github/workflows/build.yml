@@ -19,12 +19,14 @@ jobs:
           unzip -q gnirehtet-src.zip
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 | sort -V | tail -n 1)
           AJAR=$(find "$ANDROID_HOME/platforms" -name "android.jar" | sort -V | tail -n 1)
-          mkdir -p build/classes build/dex build/gen
+          mkdir -p build/classes build/dex build/gen/com/genymobile/gnirehtet
+          printf 'package com.genymobile.gnirehtet;\npublic final class BuildConfig { public static final boolean DEBUG = false; }\n' > build/gen/com/genymobile/gnirehtet/BuildConfig.java
           "$BT/aapt2" compile --dir gnirehtet-2.5.1/app/src/main/res -o build/gnirehtet_res.zip
           "$BT/aapt2" link -o build/unsigned.apk --manifest AndroidManifest.xml -I "$AJAR" \
             --custom-package com.genymobile.gnirehtet --java build/gen build/gnirehtet_res.zip
           javac --release 11 -cp "$AJAR:gnirehtet.jar" -d build/classes \
             build/gen/com/genymobile/gnirehtet/R.java \
+            build/gen/com/genymobile/gnirehtet/BuildConfig.java \
             gnirehtet-2.5.1/app/src/main/java/com/genymobile/gnirehtet/*.java \
             src/com/akemi/btbridge/*.java
           "$BT/d8" --min-api 26 --output build/dex $(find build/classes -name "*.class") gnirehtet.jar
