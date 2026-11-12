@@ -1,0 +1,40 @@
+name: Build BtBridge APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Download gnirehtet and Compile APK
+        run: |
+          curl -L -o gnirehtet.zip https://github.com/Genymobile/gnirehtet/releases/download/v2.5.1/gnirehtet-java-v2.5.1.zip
+          unzip -j gnirehtet.zip "*/gnirehtet.jar" "*/gnirehtet.apk" -d .
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 | sort -V | tail -n 1)
+          AJAR=$(find "$ANDROID_HOME/platforms" -name "android.jar" | sort -V | tail -n 1)
+          mkdir -p build/classes build/dex
+          javac --release 11 -cp "$AJAR:gnirehtet.jar" -d build/classes src/com/akemi/btbridge/*.java
+          "$BT/d8" --min-api 26 --output build/dex build/classes/com/akemi/btbridge/*.class gnirehtet.jar
+          if [ -x "$BT/aapt2" ]; then
+            "$BT/aapt2" link -o build/unsigned.apk --manifest AndroidManifest.xml -I "$AJAR"
+          else
+            "$BT/aapt" package -f -M AndroidManifest.xml -I "$AJAR" -F build/unsigned.apk
+          fi
+          (cd build/dex && zip -q -u ../unsigned.apk classes*.dex)
+          "$BT/zipalign" -f 4 build/unsigned.apk build/aligned.apk
+          keytool -genkeypair -v -keystore debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Debug,O=Android,C=US"
+          "$BT/apksigner" sign --ks debug.keystore --ks-pass pass:android \
+            --out BtBridge.apk build/aligned.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BtBridge-Files
+          path: |
+            BtBridge.apk
+            gnirehtet.apk
