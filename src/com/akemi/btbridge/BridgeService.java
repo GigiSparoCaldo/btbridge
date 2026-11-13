@@ -12,7 +12,6 @@ import android.content.Intent;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.os.IBinder;
-import android.os.PowerManager;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
@@ -32,7 +31,6 @@ public class BridgeService extends Service {
     private volatile int sessionId = 0;
     private BluetoothServerSocket activeBtServer;
     private LocalServerSocket activeLocalServer;
-    private PowerManager.WakeLock wakeLock;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -57,7 +55,6 @@ public class BridgeService extends Service {
 
         final int mySession = ++sessionId;
         cleanup();
-        acquireWakeLock();
         running = true;
 
         final String mode = intent != null ? intent.getStringExtra("mode") : "server";
@@ -218,19 +215,10 @@ public class BridgeService extends Service {
         }
     }
 
-    private void acquireWakeLock() {
-        try {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BtBridge::TunnelLock");
-            wakeLock.acquire();
-        } catch (Exception ignored) {}
-    }
-
     private void cleanup() {
         running = false;
         try { if (activeBtServer != null) activeBtServer.close(); } catch (Exception ignored) {}
         try { if (activeLocalServer != null) activeLocalServer.close(); } catch (Exception ignored) {}
-        try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) {}
     }
 
     private void sleepQuiet(long ms) {

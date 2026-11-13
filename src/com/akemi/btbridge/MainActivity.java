@@ -52,21 +52,16 @@ public class MainActivity extends Activity {
 
         String savedMac = loadMac();
         if (!savedMac.isEmpty()) {
-            Button quickClientBtn = new Button(this);
-            quickClientBtn.setText("Avvia CLIENT\n(" + savedMac + ")");
-            quickClientBtn.setOnClickListener(v -> startBridge("client", savedMac));
-            root.addView(quickClientBtn);
+            Button oneTapBtn = new Button(this);
+            oneTapBtn.setText("Connetti Watch (1-Tap)\n" + savedMac);
+            oneTapBtn.setOnClickListener(v -> connectWatchOneTap(savedMac));
+            root.addView(oneTapBtn);
         }
 
         Button serverBtn = new Button(this);
         serverBtn.setText("Avvia SERVER (Z Flip)");
         serverBtn.setOnClickListener(v -> startBridge("server", ""));
         root.addView(serverBtn);
-
-        Button vpnBtn = new Button(this);
-        vpnBtn.setText("Attiva VPN (Watch)");
-        vpnBtn.setOnClickListener(v -> startGnirehtet());
-        root.addView(vpnBtn);
 
         Button testBtn = new Button(this);
         testBtn.setText("Test Internet");
@@ -80,7 +75,7 @@ public class MainActivity extends Activity {
 
         TextView clientLabel = new TextView(this);
         clientLabel.setGravity(Gravity.CENTER);
-        clientLabel.setText("\nScegli Z Flip (Client):");
+        clientLabel.setText("\nOppure scegli dispositivo:");
         clientLabel.setPadding(0, 10, 0, 8);
         root.addView(clientLabel);
 
@@ -150,16 +145,21 @@ public class MainActivity extends Activity {
                 final String name = dev.getName() != null ? dev.getName() : "Dispositivo";
                 Button b = new Button(this);
                 b.setText(name + "\n" + mac);
-                b.setOnClickListener(v -> {
-                    saveMac(mac);
-                    startBridge("client", mac);
-                });
+                b.setOnClickListener(v -> connectWatchOneTap(mac));
                 devicesBox.addView(b);
             }
         } catch (SecurityException e) {
             netStatus = "Permesso BT mancante";
             updateStatusView();
         }
+    }
+
+    private void connectWatchOneTap(String mac) {
+        saveMac(mac);
+        startBridge("client", mac);
+        netStatus = "Avvio Client + VPN...";
+        updateStatusView();
+        handler.postDelayed(this::startGnirehtet, 450);
     }
 
     private void startBridge(String mode, String mac) {
@@ -173,6 +173,7 @@ public class MainActivity extends Activity {
 
     private void stopAll() {
         netStatus = "";
+        handler.removeCallbacksAndMessages(null);
         try {
             Intent stopVpn = new Intent(this, com.genymobile.gnirehtet.GnirehtetActivity.class);
             stopVpn.setAction("com.genymobile.gnirehtet.STOP");
@@ -189,7 +190,7 @@ public class MainActivity extends Activity {
             Intent i = new Intent(this, com.genymobile.gnirehtet.GnirehtetActivity.class);
             i.setAction("com.genymobile.gnirehtet.START");
             startActivity(i);
-            netStatus = "VPN interna avviata";
+            netStatus = "VPN + Client attivi";
         } catch (Exception e) {
             netStatus = "Err VPN: " + e.getMessage();
         }
