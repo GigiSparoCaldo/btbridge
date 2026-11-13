@@ -18,7 +18,20 @@ jobs:
           curl -L -o gnirehtet-src.zip https://github.com/Genymobile/gnirehtet/archive/refs/tags/v2.5.1.zip
           unzip -q gnirehtet-src.zip
           rm -rf gnirehtet-2.5.1/app/src/main/res/mipmap-*
-          python3 -c 'import re; p="gnirehtet-2.5.1/app/src/main/java/com/genymobile/gnirehtet/GnirehtetService.java"; s=open(p).read().replace("PendingIntent.getActivity(this, 0, stopIntent, 0)","PendingIntent.getActivity(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)"); s=re.sub(r"(^\s*)([^\n]*builder\.establish\(\);)", r"\1try { builder.addDisallowedApplication(" + chr(34) + "com.android.vending" + chr(34) + "); } catch (Exception ignored) {}\n\1\2", s, flags=re.M); open(p,"w").write(s)'
+          python3 - << 'PYEOF'
+          p = "gnirehtet-2.5.1/app/src/main/java/com/genymobile/gnirehtet/GnirehtetService.java"
+          out = []
+          for line in open(p):
+              line = line.replace(
+                  "PendingIntent.getActivity(this, 0, stopIntent, 0)",
+                  "PendingIntent.getActivity(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)"
+              )
+              if "builder.establish()" in line:
+                  indent = line[:len(line) - len(line.lstrip())]
+                  out.append(indent + 'try { builder.addDisallowedApplication("com.android.vending"); } catch (Exception ignored) {}\n')
+              out.append(line)
+          open(p, "w").writelines(out)
+          PYEOF
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 | sort -V | tail -n 1)
           AJAR=$(find "$ANDROID_HOME/platforms" -name "android.jar" | sort -V | tail -n 1)
           mkdir -p build/classes build/dex build/gen/com/genymobile/gnirehtet
